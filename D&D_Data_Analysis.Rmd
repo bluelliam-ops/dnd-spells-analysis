@@ -1,0 +1,147 @@
+---
+title: "Dungeons & Dragons 2024 Spells"
+author: "bluelliam"
+date: "2026-07-01"
+output:
+  github_document:
+    html_preview: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5)
+library(tidyverse)
+```
+
+# Introduction
+
+For my project, I used the Dungeons & Dragons 2024 Spells dataset, released as part of the TidyTuesday project on 2024-12-17. This dataset catalogues every spell from the Dungeons & Dragons Free Rules (2024 Edition). Each row represents a single spell, described by 27 variables that capture the spell's name, school of magic, casting mechanics, range and range type, duration, availability across the eight spellcasting classes (bard, cleric, druid, paladin, ranger, sorcerer, warlock, wizard), a text description, and more. In total, there are 314 spells in the dataset.
+
+The dataset was compiled by Jon Harmon (@jonthegeek on GitHub) from the official Dungeons & Dragons Free Rules (2024 edition) and released through the TidyTuesday repository. It is well suited to this project because it mixes several variable types: a numeric spell level, categorical variables, boolean flags for class availability and casting mechanics, and free text descriptions. I chose this dataset in part because I play Dungeons & Dragons regularly, so I have direct experience with the mechanics represented in the data, which makes it easier to ask meaningful questions and interpret the results.
+
+# Question 1: How Do Spell Rosters Differ Across the Eight Casting Classes?
+
+Every playable class in Dungeons & Dragons 2024 draws from its own list of spells, and these lists differ substantially in size and content. This question in full asks: how do spell roster size, cantrip availability, and spell level distribution vary across the eight spellcasting classes (bard, cleric, druid, paladin, ranger, sorcerer, warlock, wizard)? Answering this requires the class-availability flags (bard, cleric, druid, paladin, ranger, sorcerer, warlock, wizard), the numeric level variable, and the categorical school variable. I am interested in this question because, as a player, choosing a class often comes down to how flexible and varied its spell list is, and I wanted to quantify that flexibility rather than rely on intuition from playing the game.
+
+## Approach
+
+To answer this question I first reshaped the data from wide to long format, creating one row per spell-class combination for every class that can cast that spell. From level, I derived a cantrip flag (level == 0) so that cantrips can be distinguished from leveled spells.
+
+For the first plot, I used a stacked bar chart with class on the x-axis, spell count on the y-axis, and orange fill color mapped to cantrip status. A bar chart makes sense here because roster size and cantrip availability are both about counting spells within discrete categories, and stacking by a categorical fill variable (cantrip vs. leveled) lets both the total roster size and the cantrip/leveled split be read from a single plot.
+
+For the second plot, I used a faceted histogram of spell level, with one facet for each class. I choose a histogram for visualizing the distribution of a numeric variable like level, and faceting by class allows the eight distributions to be compared easier side by side.
+
+## Analysis
+
+```{r Question 1 Plot A, warning = FALSE, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(forcats)
+
+spells <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2024/2024-12-17/spells.csv")
+
+class_cols <- c("bard", "cleric", "druid", "paladin", "ranger",
+                 "sorcerer", "warlock", "wizard")
+
+spells_long <- spells %>%
+  select(name, level, school, all_of(class_cols)) %>%
+  pivot_longer(cols = all_of(class_cols), names_to = "class", values_to = "has_class") %>%
+  filter(has_class == TRUE) %>%
+  mutate(
+    cantrip = if_else(level == 0, "Cantrip", "Leveled Spell"),
+    class = str_to_title(class)
+  )
+
+ggplot(spells_long, aes(x = fct_infreq(class), fill = cantrip)) +
+  geom_bar() +
+  scale_fill_manual(values = c("Cantrip" = 'orange', "Leveled Spell" = 'lightblue'),
+                     name = "Spell Type") +
+  labs(
+    title = "Spell Roster Size by Class",
+    subtitle = "Split between cantrips and leveled spells",
+    x = "Class",
+    y = "Number of Spells"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+```{r Question 1 Plot B, warning = FALSE, message = FALSE}
+ggplot(spells_long, aes(x = level)) +
+  geom_histogram(binwidth = 1, boundary = -0.5, fill = 'lightblue', color = "white") +
+  facet_wrap(~ class, ncol = 4) +
+  scale_x_continuous(name = "Spell Level", breaks = 0:9) +
+  labs(
+    title = "Distribution of Spell Levels by Class",
+    subtitle = "Level 0 represents cantrips",
+    y = "Number of Spells"
+  ) +
+  theme_minimal(base_size = 11)
+```
+
+## Discussion
+
+The stacked bar chart shows that spell roster size varies noticeably across classes, with some classes (such as wizard and sorcerer) having an abundance more of spells. This makes sense as wizard has historically always had the most access to spells. Cantrips make up a small, fairly consistent slice of each class's roster compared to leveled spells (disregarding ranger and paladin), this shows that cantrip availability was designed to scale more slowly than overall spell access as the classes grow.
+
+The faceted histograms reveal that most classes have a level distribution that falls off at higher levels, which is expected given that high-level spells are rarer and more powerful by design. Classes with larger overall rosters tend to have a wider spread across levels, while classes with smaller rosters are more concentrated at lower levels. This pattern shows that roster size and level spread move together while more specialized classes are given narrower, more focused spell lists. This graph reinforces that the ranger and paladins class having a low spell count as they are both missing levels that start at 0 (level == 0) otherwise known as cantrips which reinforces why they have the lowest spell count.
+
+# Question 2: Are Longer-Casting Spells More Likely to Have Feet or Sight Range?
+
+## Introduction
+
+Casting time and range are two of the most tactically important aspects of a spell during gameplay; how quickly a spell can be cast, and how far it can reach. This question asks whether longer-casting spells are more likely to have a feet or sight range compared to quicker spells. Answering it requires the casting mechanics variables (action, bonus_action, ritual, casting_time_long), the range_type variable, and for additional context level. I was curious about this question because in play, slower spells (rituals, spells requiring a full minute or longer) are often utility or preparation spells, while fast spells (actions and bonus actions) tend to be combat spells, and I wanted to see whether that gameplay intuition about range shows up as a pattern in the data.
+
+## Approach
+
+To make the casting-time and range variables easier to compare, I collapsed them into simplified categories. From action, bonus_action, casting_time_long, and ritual, I created a casting_speed variable with two levels: "Fast" (action or bonus action) and "Slow" (longer casting times or ritual casting). From range_type, I created a range_category variable that groups ranges into "Feet/Sight" versus "Other" (touch, self, unlimited, etc.).
+
+For the first plot, I used a stacked proportional bar chart (position = "fill") with casting speed on the x-axis and fill color mapped to range category. This is suited to comparing the proportions of the two groups, which is exactly what the question asks (is the proportion of feet or sight-range spells different between fast and slow spells?).
+
+For the second plot, I used a boxplot of spell level by range category, with fill color mapped to casting speed. This lets me check whether the casting-speed/range pattern from the first plot holds consistently across low and high-level spells.
+
+## Analysis
+
+```{r Question 2 Plot A, warning = FALSE, message = FALSE}
+spells_q2 <- spells %>%
+  select(name, level, school, action, bonus_action, ritual, casting_time_long, range_type) %>%
+  filter(!is.na(range_type)) %>%
+  mutate(
+    casting_speed = if_else(action == TRUE | bonus_action == TRUE, "Fast", "Slow"),
+    range_category = if_else(
+      str_detect(str_to_lower(range_type), "feet|sight"),
+      "Feet/Sight",
+      "Other"
+    )
+  )
+
+ggplot(spells_q2, aes(x = casting_speed, fill = range_category)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(values = c("Feet/Sight" = 'cyan', "Other" = 'gray'),
+                     name = "Range Category") +
+  labs(
+    title = "Proportion of Feet/Sight-Range Spells by Casting Speed",
+    x = "Casting Speed",
+    y = "Proportion of Spells"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+```{r Question 2 Plot B, warning = FALSE, message = FALSE}
+ggplot(spells_q2, aes(x = range_category, y = level, fill = casting_speed)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Fast" = 'cyan', "Slow" = 'gray'), name = "Casting Speed") +
+  labs(
+    title = "Spell Level by Range Category and Casting Speed",
+    x = "Range Category",
+    y = "Spell Level"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+## Discussion
+
+The first plot shows that fast-casting spells (actions and bonus actions) have a noticeably higher proportion of feet and sight range than slow-casting spells, supporting the idea that combat-oriented, quick spells are more likely to need a measurable range to hit a target at a distance, while slow spells (often rituals or utility spells) are more likely to target the caster, an object in hand, or have unlimited/special range because they are not meant to be used by impulse in combat.
+
+The boxplots show that this pattern holds at both low and high spell levels, so it isn't because of level. It is possible that spell design intentionally pairs casting times with certain range types for game-balance reasons, which would be a design choice rather than a causal mechanism. My takeaway from this plot is that level does correlate with casting speed, but the correlation is strong for "Other" spells than for the "Feet/Sight" spells.
